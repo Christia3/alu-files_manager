@@ -5,21 +5,44 @@ const dbClient = require('../utils/db');
 
 class AuthController {
   static async getConnect(req, res) {
-    const credentials = req.headers.authorization.split(' ')[1];
-    const [email, password] = Buffer.from(credentials, 'base64').toString().split(':');
+    try {
+      const authHeader = req.headers.authorization;
+      
+      if (!authHeader || !authHeader.startsWith('Basic ')) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
-    if (!email) return res.status(400).json({ error: 'Missing email' });
-    if (!password) return res.status(400).json({ error: 'Missing password' });
+      const base64Credentials = authHeader.split(' ')[1];
+      let credentials;
+      
+      try {
+        credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
+      } catch (err) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
-    const query = { email, password: sha1(password) };
-    const user = await dbClient.db.collection('users').findOne(query);
+      const [email, password] = credentials.split(':');
+      
+      if (!email || !password) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
-    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+      const user = await dbClient.db.collection('users').findOne({ 
+        email, 
+        password: sha1(password) 
+      });
 
-    const token = uuid4();
-    await redisClient.set(`auth_${token}`, user._id.toString(), 86400);
+      if (!user) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
-    return res.status(200).json({ token });
+      const token = uuid4();
+      await redisClient.set(`auth_${token}`, user._id.toString(), 86400);
+
+      return res.status(200).json({ token });
+    } catch (error) {
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
   }
 
   static async getDisconnect(req, res) {
